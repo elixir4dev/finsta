@@ -1,4 +1,9 @@
 defmodule Finsta.Posts do
+
+  @moduledoc """
+  The Posts context.
+  """
+
   import Ecto.Query
   alias Finsta.Repo
   alias Finsta.Posts.Post

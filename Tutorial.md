@@ -404,3 +404,112 @@ It creates an <img> element with the src attribute set to `{post.image_path}`, w
 It creates two <p> elements with the text of `{post.user.email}` and `{post.caption}`, which display the email of the user who posted the image and the caption of the image.
 
 ### Update the mount/3 function
+Now we need to update our mount/3 funtion to load the data from the actual database we will use the LiveView `stream/3` function.
+The `stream/3` function is a LiveView helper that allows you to stream data from a source to the client and render it as HTML elements. 
+The function takes three arguments: socket, name, and source. The socket argument is the current state of the LiveView socket that needs to be updated. 
+The name argument is an atom that identifies the stream. The source argument is an enumerable that provides the data to be streamed.
+
+
+```
+  @impl true
+  def mount(_params, _session, socket) do
+    if connected?(socket) do
+      ...
+
+      socket=
+        ...
+        |> stream(:posts, Posts.posts())  
+      ...
+    else
+      ...
+    end
+  end
+
+```
+
+In our case the source is the Database and we do a query in the Posts context, `lib/finsta/posts.ex`
+Finally we need to add the function `posts/0` to the Posts context module to get the list of posts.
+
+```
+  def posts() do
+    query =
+       from p in Post,
+       select: p,
+       order_by: [desc: :inserted_at],
+       preload: [:user]
+
+    Repo.all(query)
+  end
+
+```
+
+## Broadcast New Posts and Notify a user when somebody posts.
+Now we are going to add the ability to broadcast new post to all users in the system and also notify
+the user when someone add a post.
+
+```
+  @impl true
+  def mount(_params, _session, socket) do
+    if connected?(socket) do
+      # Subscribe to the posts topic when connected
+      Phoenix.PubSub.subscribe(Finsta.PubSub, "posts")
+      ...
+    else
+      ...
+    end
+  end
+```
+Here we subscribte to the posts topic when connected using the `Phoenix.PubSub` module,
+so we will be notified when someone adds a post to the system.
+
+
+
+```
+  @impl true
+  def handle_event("save-post", %{"post" => post_params}, socket) do
+    ...
+
+    post_params
+     ...
+     |> case do
+       {:ok, post} ->
+          socket =
+            socket
+            |> put_flash(:info, "Post created successfully!")
+            |> push_navigate(to: ~p"/home")
+
+          # Broadcast a message when we create a post
+          Phoenix.PubSub.broadcast(Finsta.PubSub, "posts", {:new, Map.put(post, :user, user)})
+
+          {:noreply, socket}
+
+       {:error, _changeset} ->
+         ...
+     end
+  end
+```
+
+Here we sends a message to all the processes that are subscribed to the `posts` topic using the `Phoenix.PubSub` module. 
+The `{:new, Map.put(post, :user, user)}` argument is the message itself, which is a tuple containing an atom and a map.
+we need to add it, because the user association won't be loaded when it comes back from the database, so then we can
+display the email from this broadcast user
+
+To handle this message we just need to implement the `handle_info` callback
+
+```
+ @impl true
+  def handle_info({:new, post}, socket) do
+    socket =
+      socket
+      |> put_flash(:info, "#{post.user.email} just posted!")
+      |> stream_insert(:posts, post, at: 0)
+
+    {:noreply, socket}
+  end
+```
+
+## Improve Finsta Web 
+Some possible steps to improve the Phoenix LiveView projects are:
+
+- Add pagination or infinite scrolling to the feed of posts, so that the user can see more posts without loading them all at once. This can be done by using the Phoenix.LiveView.Helpers.live_paginate/2 function or the Phoenix.LiveView.InfiniteScroll module. See [this tutorial](https://blog.appsignal.com/2022/01/11/build-interactive-phoenix-liveview-uis-with-components.html) or [this article](https://www.youtube.com/watch?v=1YzAztAMgP4.) for more details.
+- Add comments and likes to the posts, so that the user can interact with other users and express their opinions. This can be done by creating new schemas and contexts for comments and likes, and adding LiveComponents and events to handle them. See [this article](https://github.com/beam-community/awesome-phoenix-liveview) or [this article](https://blog.logrocket.com/write-reusable-components-phoenix-liveview/) for more examples.nents-phoenix-liveview/.
